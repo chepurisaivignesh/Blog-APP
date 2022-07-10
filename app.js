@@ -80,7 +80,7 @@ app.post("/login",function(req,res){
     //     )
     ////////LEVEL5 START/////////////////
     const user=new User({
-        email:req.body.username,
+        username:req.body.username,
         password:req.body.password
     });
 
@@ -115,7 +115,7 @@ app.post("/register",function(req,res){
     //     });
     // });
     ////////LEVEL5 START/////////////////
-    User.register({email:req.body.username}, req.body.password, function(err, user) {
+    User.register({username:req.body.username}, req.body.password, function(err, user) {
         if (err) {
             console.log(err); 
             res.redirect("/register");
