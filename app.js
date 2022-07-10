@@ -12,6 +12,8 @@ const session = require('express-session');
 const passport=require("passport");
 const passportLocalMongoose=require("passport-local-mongoose");//We are importing passport-local as it is just a dependency for passport-local-mongoose
 
+const GoogleStrategy = require( 'passport-google-oauth2' ).Strategy;//For Level6
+const findOrCreate=require("mongoose-findorcreate");//For Level6
 
 const app = express();
 
@@ -35,7 +37,9 @@ mongoose.connect("mongodb://localhost:27017/userDB");
 
 const userSchema= new mongoose.Schema({
     email:String,
-    password:String
+    password:String,
+    googleId:String, //Only for google auth
+    secret:String
 });
 
 //Encryption for Level 2 Security not needed for Level 3
@@ -44,14 +48,45 @@ const userSchema= new mongoose.Schema({
 //LEVEL5-config-part2-start
 userSchema.plugin(passportLocalMongoose);
 //LEVEL5-config-part2-end
+userSchema.plugin(findOrCreate);//For Level6
 
 const User=mongoose.model("User",userSchema);
 
 //LEVEL5-config-part3-start
 passport.use(User.createStrategy());
-passport.serializeUser(User.serializeUser());
-passport.deserializeUser(User.deserializeUser());
+// passport.serializeUser(User.serializeUser()); Only for local auth
+// passport.deserializeUser(User.deserializeUser()); Only for local auth
 //LEVEL5-config-part3-end
+
+//LEVEL6 AND SERIALISTAIONG,DESERIALISATION FOR ALL CASES
+passport.serializeUser(function(user, done) {
+    done(null, user._id);
+    // if you use Model.id as your idAttribute maybe you'd want
+    // done(null, user.id);
+});
+
+passport.deserializeUser(function(id, done) {
+  User.findById(id, function(err, user) {
+    done(err, user);
+  });
+});
+//LEVEL6 AND SERIALISTAIONG,DESERIALISATION FOR ALL CASES^^^
+
+//LEVEL6 START
+passport.use(new GoogleStrategy({
+    clientID:     process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets",
+    passReqToCallback   : true
+  },
+  function(request, accessToken, refreshToken, profile, done) {
+    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return done(err, user);
+    });
+  }
+));
+//findOrCreate is not a mongoose function its a psuedo function and inorder to make it work we are using a 3rd party lib called mongoose-findorcreate
+
 
 //DB INITIALIZING COMPLETED
 
@@ -59,6 +94,18 @@ app.get("/",function(req,res){
     res.render("home")
 });
 /////////////////////////
+//FOR LEVEL6 ONLY
+app.get("/auth/google",
+passport.authenticate("google",{scope:["profile"]})
+);
+
+app.get( "/auth/google/secrets",
+    passport.authenticate( 'google', {
+        successRedirect: '/secrets',
+        failureRedirect: '/login'
+}));
+/////////////////////////
+
 app.get("/login",function(req,res){
     res.render("login")
 })
@@ -130,20 +177,45 @@ app.post("/register",function(req,res){
 ////////////////////////////////
 
 app.get("/secrets",function(req,res){
-    if (req.isAuthenticated()){
-        res.render("secrets");
-    }else{
-        res.redirect("/login");
-    }
+    User.find({"secret":{$ne:null}},function(err,foundUsers){
+        if (err){
+            console.log(err);
+        }else{
+            if (foundUsers){
+                res.render("secrets",{usersWithSecrets:foundUsers});
+            }
+        }
+    })
     
 });
 
 app.get("/logout",function(req,res){
    req.logout(function(err){if(err){console.log(err)}});
    res.redirect("/");
-})
-// app.get("/submit",function(req,res){
-//     res.render("submit")
-// })
+});
+
+app.get("/submit",function(req,res){
+    if (req.isAuthenticated()){
+        res.render("submit");
+    }else{
+        res.redirect("/login");
+    }
+});
+
+app.post("/submit",function(req,res){
+    const submittedSecret=req.body.secret;
+    User.findById(req.user.id,function(err,foundUser){
+        if (err){
+            console.log(err)
+        }else{
+            if (foundUser){
+                foundUser.secret=submittedSecret;
+                foundUser.save(function(){
+                    res.redirect("/secrets");
+                });
+            }
+        }
+    });
+});
 
 app.listen(3000,function(){console.log("Server is running.")});
